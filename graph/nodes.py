@@ -221,6 +221,56 @@ def _build_reservation_summary(reservation: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Node: mcp_write  (Stage 3)
+# ---------------------------------------------------------------------------
+
+def mcp_write_node(state: ParkingState) -> dict:
+    """
+    Call the MCP server to persist the confirmed reservation to a text file.
+
+    Runs only on the approved branch (see builder.py routing).
+    Failures are non-fatal: the user still receives their approval message
+    and the error is logged for operator investigation.
+
+    Sets:
+        reservation_confirmed (bool)
+        reservation_file_path (str | None)
+    """
+    import httpx
+
+    reservation = state.get("reservation", {})
+    name = f"{reservation.get('name', '')} {reservation.get('surname', '')}".strip()
+
+    payload = {
+        "name": name,
+        "car_number": reservation.get("car_number", ""),
+        "start_date": reservation.get("start_date", ""),
+        "end_date": reservation.get("end_date", ""),
+    }
+
+    try:
+        response = httpx.post(
+            f"{settings.mcp_server_url}/reservations",
+            json=payload,
+            headers={"X-API-Key": settings.mcp_api_key},
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return {
+            "reservation_confirmed": True,
+            "reservation_file_path": data.get("file_path", ""),
+        }
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("MCP write failed: %s", exc)
+        return {
+            "reservation_confirmed": False,
+            "reservation_file_path": None,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Node: notify_admin  (Stage 2)
 # ---------------------------------------------------------------------------
 

@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     smtp_password: Optional[str] = None
     admin_email: Optional[str] = None
 
+    # Stage 3: MCP server
+    mcp_server_url: str = "http://localhost:8000"
+    mcp_api_key: str = "dev-mcp-key"
+
     class Config:
         env_file = ".env"
 

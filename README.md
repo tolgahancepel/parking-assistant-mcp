@@ -1,4 +1,4 @@
-# Slytherin Parking Assistant — Stages 1 & 2
+# Slytherin Parking Assistant — Stage 3
 
 An intelligent parking assistant chatbot built with **LangChain**, **LangGraph**, **Pinecone**, and **OpenAI**, using a Retrieval-Augmented Generation (RAG) architecture with a human-in-the-loop reservation approval workflow.
 
@@ -6,7 +6,35 @@ An intelligent parking assistant chatbot built with **LangChain**, **LangGraph**
 
 ## Architecture
 
-<img src="docs/img/parking_assistant_architecture-LLDD.png" alt="Architecture" title="Architecture">
+```
+User (Streamlit — app.py)
+       │
+       ▼
+  LangGraph Workflow  (MemorySaver checkpointer, thread_id per session)
+  ┌──────────────────────────────────────────────────────────────┐
+  │  input_guard ──(unsafe)──► END                               │
+  │       │                                                      │
+  │  [approval_status == "pending"?] ──► check_approval_status   │
+  │       │                                                      │
+  │  classify_intent                                             │
+  │       ├── "info" / "other" ──► retrieve ──► generate         │
+  │       └── "reservation"   ──► manage_reservation             │
+  │                                    │                         │
+  │                          [complete?]                         │
+  │                                    ├── no  ──► output_guard  │
+  │                                    └── yes ──► notify_admin  │
+  │                                                    │         │
+  │                                             ◉ INTERRUPT      │
+  │                                                    │         │
+  │                                        await_admin_approval  │
+  │                                                    │         │
+  │                                             output_guard     │
+  └──────────────────────────────────────────────────────────────┘
+       │
+       ▼
+  Pinecone (static parking docs)   OpenAI (embeddings + chat)
+  pending_reservations.json        admin_notifications.log (SMTP fallback)
+```
 
 ### Human-in-the-loop flow
 
@@ -122,7 +150,48 @@ Run **once** to embed and upload the 10 parking documents:
 python scripts/seed_pinecone.py
 ```
 
-### 4. Run the app
+### 4. Start the MCP server
+
+The MCP server must be running **before** the Streamlit app so that approved reservations are written to file.
+
+```bash
+# Option A — convenience script (reads .env automatically)
+bash scripts/start_mcp_server.sh
+
+# Option B — run directly
+MCP_API_KEY=dev-mcp-key uvicorn mcp_server.server:app --host 0.0.0.0 --port 8000
+
+# Option C — run in background
+bash scripts/start_mcp_server.sh &
+```
+
+**Stop the MCP server:**
+
+```bash
+# If running in foreground
+Ctrl+C
+
+# If running in background
+pkill -f "uvicorn mcp_server"
+
+# Or find and kill by port
+lsof -i :8000          # find the PID
+kill <PID>
+```
+
+Verify it is up:
+
+```bash
+curl http://localhost:8000/health
+# → {"status":"ok"}
+```
+
+> The Streamlit sidebar shows **🟢 online / 🔴 offline** for the MCP server at all times.
+> If the server is offline, the chatbot still works — only the final file write after approval is skipped.
+
+### 5. Start the Streamlit app
+
+Open a **second terminal** and run:
 
 ```bash
 streamlit run app.py
@@ -132,17 +201,17 @@ Three pages are available in the sidebar:
 
 | Page | URL path | Purpose |
 |---|---|---|
-| Chat | `/` | User-facing chatbot |
-| Admin Panel | `/Admin_Panel` | Approve / reject reservations |
-| Reservations | `/Reservations` | Table of all reservations |
+| 🅿️ Chat | `/` | User-facing chatbot |
+| 🔐 Admin Panel | `/Admin_Panel` | Approve / reject pending reservations |
+| 📋 Reservations | `/Reservations` | Table of all reservations with status filter |
 
-### 5. Run the RAG evaluation
+### 6. Run the RAG evaluation
 
 ```bash
 python scripts/run_eval.py
 ```
 
-### 6. Run the tests
+### 7. Run the tests
 
 ```bash
 pytest tests/ -v
@@ -195,5 +264,5 @@ Run via `python scripts/run_eval.py`. Prints a per-query and aggregate report.
 |---|---|---|
 | **1** | ✅ Done | RAG chatbot, Pinecone, guardrails, evaluation |
 | **2** | ✅ Done | Human-in-the-loop admin approval, reservations table |
-| **3** | ⬜ Next | MCP server writes confirmed reservations to file |
-| **4** | ⬜ Future | Full LangGraph orchestration of all components |
+| **3** | ✅ Done | FastAPI MCP server writes confirmed reservations to file |
+| **4** | ⬜ Next | Full LangGraph orchestration of all components |

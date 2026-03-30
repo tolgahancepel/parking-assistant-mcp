@@ -1,0 +1,30 @@
+# Environment & secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Runtime data
+pending_reservations.json
+admin_notifications.log
+
+# Streamlit
+.streamlit/
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/

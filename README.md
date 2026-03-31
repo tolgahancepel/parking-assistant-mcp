@@ -6,35 +6,7 @@ An intelligent parking assistant chatbot built with **LangChain**, **LangGraph**
 
 ## Architecture
 
-```
-User (Streamlit — app.py)
-       │
-       ▼
-  LangGraph Workflow  (MemorySaver checkpointer, thread_id per session)
-  ┌──────────────────────────────────────────────────────────────┐
-  │  input_guard ──(unsafe)──► END                               │
-  │       │                                                      │
-  │  [approval_status == "pending"?] ──► check_approval_status   │
-  │       │                                                      │
-  │  classify_intent                                             │
-  │       ├── "info" / "other" ──► retrieve ──► generate         │
-  │       └── "reservation"   ──► manage_reservation             │
-  │                                    │                         │
-  │                          [complete?]                         │
-  │                                    ├── no  ──► output_guard  │
-  │                                    └── yes ──► notify_admin  │
-  │                                                    │         │
-  │                                             ◉ INTERRUPT      │
-  │                                                    │         │
-  │                                        await_admin_approval  │
-  │                                                    │         │
-  │                                             output_guard     │
-  └──────────────────────────────────────────────────────────────┘
-       │
-       ▼
-  Pinecone (static parking docs)   OpenAI (embeddings + chat)
-  pending_reservations.json        admin_notifications.log (SMTP fallback)
-```
+<img src="docs/img/parking_assistant_architecture-LLDD.png" alt="Architecture" title="Architecture">
 
 ### Human-in-the-loop flow
 

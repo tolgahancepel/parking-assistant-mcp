@@ -145,7 +145,7 @@ def manage_reservation_node(state: ParkingState) -> dict:
       'car_number'→ extract car_number    → ask for 'start_date'
       'start_date'→ extract start_date    → ask for 'end_date'
       'end_date'  → extract end_date      → step = 'complete', show summary
-      'complete'  → reservation already done, redirect to info flow
+      'complete'  → previous reservation done, reset state and start a new one
     """
     step = state.get("reservation_step")
     reservation = dict(state.get("reservation") or {})
@@ -160,13 +160,19 @@ def manage_reservation_node(state: ParkingState) -> dict:
             "answer": message,
         }
 
-    # ── If already complete, treat as info query ──
+    # ── If already complete, reset state and start a new reservation ──
     if step == "complete":
-        message = (
-            "Your reservation has already been submitted for approval. "
-            "Please wait for administrator approval, or you can cancel the request."
-        )
-        return {"answer": message}
+        next_step = RESERVATION_STEPS[0]
+        message = RESERVATION_STEP_MESSAGES[next_step]
+        return {
+            "reservation_step": next_step,
+            "reservation": {},
+            "approval_status": None,
+            "approval_token": None,
+            "reservation_confirmed": None,
+            "reservation_file_path": None,
+            "answer": message,
+        }
 
     # ── Extract the current field from the user's last message ──
     extraction_response = _llm().invoke(
@@ -371,7 +377,11 @@ def output_guard_node(state: ParkingState) -> dict:
     in_reservation = bool(
         state.get("reservation_step") and state.get("reservation_step") != "complete"
     )
-    is_safe, reason = check_output(answer, skip_llm_check=in_reservation)
+    # Also skip for admin decision messages — they contain the current user's own
+    # reservation details (name, plate, dates) which can cause false positives in
+    # the leakage check (the LLM may mistake them for another user's personal data).
+    is_admin_decision = state.get("approval_status") in ("approved", "rejected")
+    is_safe, reason = check_output(answer, skip_llm_check=in_reservation or is_admin_decision)
 
     if not is_safe:
         answer = (

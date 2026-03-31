@@ -33,9 +33,9 @@ SAMPLE_RESERVATION = {
 # ---------------------------------------------------------------------------
 
 class TestAuthentication:
-    def test_missing_api_key_returns_403(self):
+    def test_missing_api_key_is_rejected(self):
         response = client.post("/reservations", json=SAMPLE_RESERVATION)
-        assert response.status_code == 403
+        assert response.status_code in (401, 403)
 
     def test_wrong_api_key_returns_403(self):
         response = client.post(

@@ -6,7 +6,35 @@ An intelligent parking assistant chatbot built with **LangChain**, **LangGraph**
 
 ## Architecture
 
-<img src="docs/img/parking_assistant_architecture-LLDD.png" alt="Architecture" title="Architecture">
+```
+User (Streamlit — app.py)
+       │
+       ▼
+  LangGraph Workflow  (MemorySaver checkpointer, thread_id per session)
+  ┌──────────────────────────────────────────────────────────────┐
+  │  input_guard ──(unsafe)──► END                               │
+  │       │                                                      │
+  │  [approval_status == "pending"?] ──► check_approval_status   │
+  │       │                                                      │
+  │  classify_intent                                             │
+  │       ├── "info" / "other" ──► retrieve ──► generate         │
+  │       └── "reservation"   ──► manage_reservation             │
+  │                                    │                         │
+  │                          [complete?]                         │
+  │                                    ├── no  ──► output_guard  │
+  │                                    └── yes ──► notify_admin  │
+  │                                                    │         │
+  │                                             ◉ INTERRUPT      │
+  │                                                    │         │
+  │                                        await_admin_approval  │
+  │                                                    │         │
+  │                                             output_guard     │
+  └──────────────────────────────────────────────────────────────┘
+       │
+       ▼
+  Pinecone (static parking docs)   OpenAI (embeddings + chat)
+  pending_reservations.json        admin_notifications.log (SMTP fallback)
+```
 
 ### Human-in-the-loop flow
 
@@ -186,8 +214,30 @@ python scripts/run_eval.py
 ### 7. Run the tests
 
 ```bash
+# Full suite
 pytest tests/ -v
+
+# By category
+pytest tests/test_guardrails.py tests/test_rag.py -v          # unit: nodes & guardrails
+pytest tests/test_admin_agent.py tests/test_store.py \
+       tests/test_notifier.py tests/test_graph_routing.py -v  # unit: remaining modules
+pytest tests/test_evaluation.py tests/test_mcp.py -v          # unit: eval & MCP server
+pytest tests/test_integration.py -v                           # end-to-end pipeline
+pytest tests/test_load.py -v                                  # load & performance
 ```
+
+| File | What it tests |
+|---|---|
+| `test_rag.py` | RAG nodes (retrieve, generate, classify, manage_reservation) |
+| `test_guardrails.py` | Input / output guardrail functions |
+| `test_evaluation.py` | Precision@K, Recall@K, MRR, latency metrics |
+| `test_mcp.py` | MCP server auth, file write, GET endpoint |
+| `test_admin_agent.py` | Admin agent notification and decision formatting |
+| `test_store.py` | Pending reservations JSON store |
+| `test_notifier.py` | SMTP send and file-log fallback |
+| `test_graph_routing.py` | LangGraph routing functions in builder.py |
+| `test_integration.py` | Full end-to-end graph pipeline (info query, unsafe input, reservation flow, admin approval resume) |
+| `test_load.py` | Concurrent MCP writes, chatbot throughput, admin approval load |
 
 ---
 

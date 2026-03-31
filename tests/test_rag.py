@@ -219,7 +219,9 @@ class TestManageReservationNode:
         )
         result = manage_reservation_node(state)
 
-        assert result.get("reservation_step") == "name"  # stays on same step
+        # The node only returns changed keys; reservation_step is unchanged so
+        # LangGraph keeps the existing value in state — it is NOT in the return dict.
+        assert "reservation_step" not in result
         assert "didn't catch" in result["answer"].lower()
 
     @patch("graph.nodes._llm")
@@ -246,3 +248,63 @@ class TestManageReservationNode:
         assert result["reservation_step"] == "complete"
         assert "summary" in result["answer"].lower()
         assert "pending" in result["answer"].lower()
+
+    def test_complete_step_resets_state_for_new_reservation(self):
+        """When step='complete', state must be reset so a new reservation can begin."""
+        from graph.nodes import manage_reservation_node
+
+        state = make_state(
+            reservation_step="complete",
+            reservation={"name": "Alice", "surname": "Smith", "car_number": "ABC-1234"},
+            approval_status="approved",
+            approval_token="old-token",
+        )
+        result = manage_reservation_node(state)
+
+        assert result["reservation_step"] == "name"
+        assert result["reservation"] == {}
+        assert result["approval_status"] is None
+        assert result["approval_token"] is None
+        assert "first name" in result["answer"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Output guard node tests
+# ---------------------------------------------------------------------------
+
+class TestOutputGuardNode:
+    @patch("graph.nodes.check_output")
+    def test_admin_decision_skips_llm_check(self, mock_check_output):
+        """
+        After admin approval/rejection the LLM leakage check must be skipped
+        (skip_llm_check=True) to prevent false positives on the user's own
+        name, plate, and dates that appear in the decision message.
+        """
+        from graph.nodes import output_guard_node
+
+        mock_check_output.return_value = (True, "")
+
+        state = make_state(
+            answer="Great news! Your reservation for Alice Smith (ABC-1234) is approved.",
+            reservation_step="complete",
+            approval_status="approved",
+        )
+        output_guard_node(state)
+
+        _, kwargs = mock_check_output.call_args
+        assert kwargs.get("skip_llm_check") is True, (
+            "LLM check should be skipped for admin decision messages"
+        )
+
+    @patch("graph.nodes.check_output")
+    def test_normal_answer_runs_llm_check(self, mock_check_output):
+        """For regular RAG answers the LLM check must run (skip_llm_check=False)."""
+        from graph.nodes import output_guard_node
+
+        mock_check_output.return_value = (True, "")
+
+        state = make_state(answer="Standard parking is $3/hour.", approval_status=None)
+        output_guard_node(state)
+
+        _, kwargs = mock_check_output.call_args
+        assert kwargs.get("skip_llm_check") is False

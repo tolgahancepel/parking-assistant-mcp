@@ -6,6 +6,7 @@ Streamlit chat UI for the Slytherin parking assistant.
 import time
 from uuid import uuid4
 
+import httpx
 import streamlit as st
 from langchain_core.messages import HumanMessage
 
@@ -73,6 +74,14 @@ if is_awaiting_admin:
 
 with st.sidebar:
     st.header("Session Info")
+
+    # MCP server health indicator
+    try:
+        r = httpx.get(f"{__import__('config').settings.mcp_server_url}/health", timeout=2)
+        mcp_ok = r.status_code == 200
+    except Exception:
+        mcp_ok = False
+    st.write(f"**MCP server:** {'🟢 online' if mcp_ok else '🔴 offline — reservations will not be saved'}")
     st.caption(f"`thread_id`: {thread_id[:8]}…")
 
     reservation = state_values.get("reservation", {})

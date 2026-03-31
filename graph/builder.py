@@ -1,7 +1,7 @@
 """
 Assembles and compiles the LangGraph StateGraph.
 
-Stage 2 graph (extends Stage 1):
+Stage 3 graph (extends Stage 2):
 
   START
     │
@@ -17,7 +17,11 @@ Stage 2 graph (extends Stage 1):
           ▼
         [router: in_reservation?]
           ├── yes ──► manage_reservation ──► [complete?]
-          │                ├── yes ──► notify_admin ──► ◉ INTERRUPT ──► await_admin_approval ──► output_guard ──► END
+          │                ├── yes ──► notify_admin ──► ◉ INTERRUPT ──► await_admin_approval
+          │                │                                                       │
+          │                │                                            [approved?]
+          │                │                                    ├── yes ──► mcp_write ──► output_guard ──► END
+          │                │                                    └── no  ──────────────── output_guard ──► END
           │                └── no  ──► output_guard ──► END
           └── no  ──► classify_intent
                           ├── "info"/"other" ──► retrieve ──► generate ──► output_guard ──► END
@@ -27,8 +31,8 @@ Stage 2 graph (extends Stage 1):
   Resume: admin calls graph.update_state({approval_status: "approved"|"rejected"})
           then graph.invoke(None, config)
 
-The MemorySaver checkpointer persists the full conversation state across
-Streamlit reruns and between the user chat and admin panel.
+mcp_write calls the FastAPI MCP server (mcp_server/server.py) which appends
+the confirmed reservation to confirmed_reservations.txt.
 """
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -40,6 +44,7 @@ from graph.nodes import (
     generate_node,
     input_guard_node,
     manage_reservation_node,
+    mcp_write_node,
     notify_admin_node,
     output_guard_node,
     retrieve_node,
@@ -139,6 +144,9 @@ def build_graph() -> StateGraph:
     graph.add_node("await_admin_approval", await_admin_approval_node)
     graph.add_node("check_approval_status", check_approval_status_node)
 
+    # Stage 3 nodes
+    graph.add_node("mcp_write", mcp_write_node)
+
     # Entry point
     graph.add_edge(START, "input_guard")
 
@@ -172,9 +180,16 @@ def build_graph() -> StateGraph:
         {"notify_admin": "notify_admin", "output_guard": "output_guard"},
     )
 
-    # Stage 2 path: notify → [INTERRUPT] → approval → output_guard
+    # Stage 2 path: notify → [INTERRUPT] → approval
     graph.add_edge("notify_admin", "await_admin_approval")
-    graph.add_edge("await_admin_approval", "output_guard")
+
+    # Stage 3: after approval, write to file if approved; skip if rejected
+    graph.add_conditional_edges(
+        "await_admin_approval",
+        lambda s: "mcp_write" if s.get("approval_status") == "approved" else "output_guard",
+        {"mcp_write": "mcp_write", "output_guard": "output_guard"},
+    )
+    graph.add_edge("mcp_write", "output_guard")
 
     # Status check: if store already updated → add message directly
     graph.add_conditional_edges(
